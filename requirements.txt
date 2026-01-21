@@ -1,4 +1,4 @@
-google-generativeai
+google-genai
 gspread
 oauth2client
 Pillow
