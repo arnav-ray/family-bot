@@ -1,26 +1,23 @@
 from http.server import BaseHTTPRequestHandler
 import json
 import os
+import base64
 import requests
-import google.generativeai as genai
+from groq import Groq
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
-from PIL import Image
-from io import BytesIO
 
 # --- CONFIGURATION ---
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY") # New Key
 SHEET_ID = os.environ.get("GOOGLE_SHEET_ID")
 ALLOWED_USERS = json.loads(os.environ.get("ALLOWED_USERS", "[]"))
 
 # --- SETUP CLIENTS ---
-# 1. Configure AI (Using the model your project actually has)
-genai.configure(api_key=GOOGLE_API_KEY)
-model = genai.GenerativeModel('gemini-2.0-flash') 
+client = Groq(api_key=GROQ_API_KEY)
 
-# 2. Configure Sheets
+# Google Sheets Setup
 try:
     creds_dict = json.loads(os.environ.get("GOOGLE_JSON_KEY"))
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
@@ -45,13 +42,18 @@ def send_telegram(chat_id, text):
     payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
     requests.post(url, json=payload)
 
-def get_telegram_file(file_id):
+def get_telegram_image_base64(file_id):
+    # 1. Get File Path
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getFile?file_id={file_id}"
     resp = requests.get(url).json()
     file_path = resp['result']['file_path']
+    
+    # 2. Download Image
     download_url = f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{file_path}"
-    file_data = requests.get(download_url).content
-    return Image.open(BytesIO(file_data))
+    image_data = requests.get(download_url).content
+    
+    # 3. Encode to Base64 for Groq
+    return base64.b64encode(image_data).decode('utf-8')
 
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
@@ -74,31 +76,56 @@ class handler(BaseHTTPRequestHandler):
         if user_id not in ALLOWED_USERS:
             self.send_response(200); self.end_headers(); return
 
-        # Commands
-        if 'text' in msg and msg['text'].startswith('/'):
-            if msg['text'] == '/start':
-                send_telegram(chat_id, "🤖 **Bot is Ready!**\nType `15 Lunch` or send a receipt.")
+        # Help Command
+        if 'text' in msg and msg['text'] == '/start':
+            send_telegram(chat_id, "🤖 **Groq Bot Ready!**\nType `15 Lunch` or send a photo.")
             self.send_response(200); self.end_headers(); return
 
-        # Processing
+        # Prepare Content for AI
         try:
-            prompt = SYSTEM_PROMPT.format(date=datetime.now().strftime("%Y-%m-%d"))
-            content = [prompt]
+            prompt_text = SYSTEM_PROMPT.format(date=datetime.now().strftime("%Y-%m-%d"))
+            messages = []
 
             if 'photo' in msg:
-                send_telegram(chat_id, "👀 Scanning receipt...")
-                image = get_telegram_file(msg['photo'][-1]['file_id'])
-                content.append(image)
-                content.append("Analyze this image.")
+                send_telegram(chat_id, "👀 Scanning receipt (via Groq)...")
+                base64_image = get_telegram_image_base64(msg['photo'][-1]['file_id'])
+                
+                messages = [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt_text + "\nAnalyze this receipt image."},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
+                            }
+                        ]
+                    }
+                ]
             elif 'text' in msg:
-                content.append(f"Input: {msg['text']}")
+                messages = [
+                    {
+                        "role": "system",
+                        "content": prompt_text
+                    },
+                    {
+                        "role": "user",
+                        "content": msg['text']
+                    }
+                ]
             else:
                 self.send_response(200); self.end_headers(); return
 
-            # AI Call
-            response = model.generate_content(content)
-            clean_json = response.text.replace("```json", "").replace("```", "").strip()
-            parsed = json.loads(clean_json)
+            # Call Groq AI (Llama 3.2 Vision)
+            chat_completion = client.chat.completions.create(
+                messages=messages,
+                model="llama-3.2-11b-vision-preview",
+                temperature=0,
+                response_format={"type": "json_object"}
+            )
+            
+            response_content = chat_completion.choices[0].message.content
+            parsed = json.loads(response_content)
             
             amount = float(parsed.get('amount', 0))
             if amount > 0:
@@ -113,11 +140,11 @@ class handler(BaseHTTPRequestHandler):
                 ])
                 send_telegram(chat_id, f"✅ Saved *€{amount}* to *{parsed.get('category')}*")
             else:
-                send_telegram(chat_id, "⚠️ I couldn't find an amount.")
+                send_telegram(chat_id, "⚠️ No amount found.")
 
         except Exception as e:
             print(f"Error: {e}")
-            send_telegram(chat_id, "⚠️ Error. Try '15 Lunch'")
+            send_telegram(chat_id, "⚠️ Error. Try again.")
 
         self.send_response(200)
         self.end_headers()
