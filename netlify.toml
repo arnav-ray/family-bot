@@ -1,0 +1,6 @@
+[build]
+  functions = "netlify/functions"
+
+[functions]
+  python_runtime = "3.9"
+  included_files = ["credentials.json"]
