@@ -10,14 +10,13 @@ from datetime import datetime
 
 # --- CONFIGURATION ---
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY") # New Key
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 SHEET_ID = os.environ.get("GOOGLE_SHEET_ID")
 ALLOWED_USERS = json.loads(os.environ.get("ALLOWED_USERS", "[]"))
 
 # --- SETUP CLIENTS ---
 client = Groq(api_key=GROQ_API_KEY)
 
-# Google Sheets Setup
 try:
     creds_dict = json.loads(os.environ.get("GOOGLE_JSON_KEY"))
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
@@ -26,15 +25,18 @@ try:
 except Exception as e:
     print(f"Auth Error: {e}")
 
+# --- UPDATED BRAIN RULES ---
 SYSTEM_PROMPT = """
 Current Date: {date}
-Categories: Groceries 🛒, Food Takeout 🍕, Travel ✈️, Subscription 📺, Investment 💰, Household 🏠, Transport 🚌.
+Categories: Groceries 🛒, Food Takeout 🍕, Travel ✈️, Subscription 📺, Investment 💰, Household 🏠, Transport 🚌, Other 🤷.
 Task: Parse input (text or image) into JSON: {{"amount": float, "category": str, "merchant": str, "note": str}}.
-Rules: 
-1. If no currency, assume EUR.
-2. If category is ambiguous, use "Other".
-3. Auto-fix merchant names.
-4. Output JSON only.
+
+CRITICAL RULES:
+1. "DM" or "dm" means the shop "dm-drogerie markt". DO NOT treat it as Deutsche Mark currency.
+2. Always output amount in EUR.
+3. If no currency is specified, assume EUR.
+4. If category is ambiguous, use "Other".
+5. Output JSON only.
 """
 
 def send_telegram(chat_id, text):
@@ -43,16 +45,11 @@ def send_telegram(chat_id, text):
     requests.post(url, json=payload)
 
 def get_telegram_image_base64(file_id):
-    # 1. Get File Path
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getFile?file_id={file_id}"
     resp = requests.get(url).json()
     file_path = resp['result']['file_path']
-    
-    # 2. Download Image
     download_url = f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{file_path}"
     image_data = requests.get(download_url).content
-    
-    # 3. Encode to Base64 for Groq
     return base64.b64encode(image_data).decode('utf-8')
 
 class handler(BaseHTTPRequestHandler):
@@ -72,54 +69,48 @@ class handler(BaseHTTPRequestHandler):
         chat_id = msg['chat']['id']
         user_id = msg.get('from', {}).get('id')
         
+        # 1. ROBUST USER NAME EXTRACTION
+        first_name = msg.get('from', {}).get('first_name', '')
+        username = msg.get('from', {}).get('username', '')
+        # Use first name, fallback to username, fallback to 'Unknown'
+        user_name = first_name if first_name else (username if username else 'Unknown')
+        
         # Security Check
         if user_id not in ALLOWED_USERS:
             self.send_response(200); self.end_headers(); return
 
-        # Help Command
         if 'text' in msg and msg['text'] == '/start':
-            send_telegram(chat_id, "🤖 **Groq Bot Ready!**\nType `15 Lunch` or send a photo.")
+            send_telegram(chat_id, "🤖 **Bot Ready!**\nType `5 DM` to test.")
             self.send_response(200); self.end_headers(); return
 
-        # Prepare Content for AI
         try:
             prompt_text = SYSTEM_PROMPT.format(date=datetime.now().strftime("%Y-%m-%d"))
             messages = []
 
             if 'photo' in msg:
-                send_telegram(chat_id, "👀 Scanning receipt (via Groq)...")
+                send_telegram(chat_id, "👀 Scanning receipt...")
                 base64_image = get_telegram_image_base64(msg['photo'][-1]['file_id'])
-                
                 messages = [
                     {
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": prompt_text + "\nAnalyze this receipt image."},
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
-                            }
+                            {"type": "text", "text": prompt_text + "\nAnalyze this receipt."},
+                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
                         ]
                     }
                 ]
             elif 'text' in msg:
                 messages = [
-                    {
-                        "role": "system",
-                        "content": prompt_text
-                    },
-                    {
-                        "role": "user",
-                        "content": msg['text']
-                    }
+                    {"role": "system", "content": prompt_text},
+                    {"role": "user", "content": msg['text']}
                 ]
             else:
                 self.send_response(200); self.end_headers(); return
 
-            # Call Groq AI (Llama 3.2 Vision)
+            # Call AI
             chat_completion = client.chat.completions.create(
                 messages=messages,
-                model="meta-llama/llama-4-scout-17b-16e-instruct",
+                model="meta-llama/llama-4-scout-17b-16e-instruct", # Using the working model
                 temperature=0,
                 response_format={"type": "json_object"}
             )
@@ -130,13 +121,14 @@ class handler(BaseHTTPRequestHandler):
             amount = float(parsed.get('amount', 0))
             if amount > 0:
                 sh = gc.open_by_key(SHEET_ID).sheet1
+                # 2. EXPLICIT APPEND WITH USER NAME
                 sh.append_row([
                     datetime.now().strftime("%Y-%m-%d %H:%M"),
                     amount,
                     parsed.get('category', 'Other'),
                     parsed.get('merchant', 'Unknown'),
                     parsed.get('note', ''),
-                    msg.get('from', {}).get('first_name', 'User')
+                    user_name # Explicit variable
                 ])
                 send_telegram(chat_id, f"✅ Saved *€{amount}* to *{parsed.get('category')}*")
             else:
