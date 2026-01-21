@@ -29,20 +29,48 @@ except Exception as e:
 # --- UPDATED BRAIN RULES ---
 SYSTEM_PROMPT = """
 Current Date: {date}
-Categories: Groceries 🛒, Food Takeout 🍕, Travel ✈️, Subscription 📺, Investment 💰, Household 🏠, Transport 🚌, Other 🤷.
-Task: Parse input (text or image) into JSON: {{"amount": float, "category": str, "merchant": str, "note": str}}.
 
-CRITICAL RULES:
-1. "DM" or "dm" means the shop "dm-drogerie markt". DO NOT treat it as Deutsche Mark currency.
-2. Always output amount in EUR.
-3. If no currency is specified, assume EUR.
-4. If category is ambiguous, use "Other".
-5. Output JSON only.
+YOUR TASK:
+Parse user input (text or receipt image) into this exact JSON format:
+{{"amount": float, "category": str, "merchant": str, "note": str}}
 
-MATH & CURRENCY FIXES:
-6. If the user types an integer like "655" for a grocery store (Lidl, Aldi, etc), assume it is cents and convert to 6.55.
-7. If the user types "6576" for groceries, assume 65.76 (or similar logical amount).
-8. Treat commas (,) as decimal points (.) for amounts.
+CATEGORIES (choose ONLY from these):
+- Groceries 🛒 (Rewe, Aldi, Lidl, Edeka, Kaufland)
+- Food Takeout 🍕 (Restaurants, delivery, fast food)
+- Travel ✈️ (Flights, hotels, Deutsche Bahn, Uber, taxis)
+- Subscription 📺 (Netflix, Spotify, Lingoda, gym memberships)
+- Investment 💰 (Stocks, ETFs, savings deposits)
+- Household 🏠 (dm-drogerie, cleaning supplies, furniture)
+- Transport 🚌 (Public transit, fuel, parking)
+- Other 🤷 (Use when nothing else fits)
+
+CRITICAL PARSING RULES:
+1. "DM" or "dm" = dm-drogerie markt drugstore, NOT Deutsche Mark currency
+2. All amounts must be in EUR (Euros)
+3. If no currency specified, assume EUR
+4. Treat commas (,) as decimal separators: "6,55" = 6.55 EUR
+5. Do NOT convert integers to cents: "655" = 655.00 EUR (not 6.55)
+6. TRUST the exact number given - do not scale down large amounts
+7. Output ONLY valid JSON - no markdown, no explanations, no preamble
+
+EXAMPLES:
+Input: "45 Rewe"
+Output: {{"amount": 45.0, "category": "Groceries", "merchant": "Rewe", "note": ""}}
+
+Input: "5 DM"
+Output: {{"amount": 5.0, "category": "Household", "merchant": "dm-drogerie markt", "note": ""}}
+
+Input: "12,50 pizza"
+Output: {{"amount": 12.5, "category": "Food Takeout", "merchant": "Unknown", "note": "pizza"}}
+
+Input: "655 investment etf"
+Output: {{"amount": 655.0, "category": "Investment", "merchant": "Unknown", "note": "etf"}}
+
+Input: "Taxi zum Flughafen 25"
+Output: {{"amount": 25.0, "category": "Transport", "merchant": "Taxi", "note": "zum Flughafen"}}
+
+Input: Receipt image showing: "EDEKA - Total: 34,89 EUR"
+Output: {{"amount": 34.89, "category": "Groceries", "merchant": "Edeka", "note": ""}}
 """
 
 # --- TEXT BLOCKS ---
