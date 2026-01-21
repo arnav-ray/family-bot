@@ -17,7 +17,7 @@ ALLOWED_USERS = json.loads(os.environ.get("ALLOWED_USERS", "[]"))
 
 # --- SETUP CLIENTS ---
 genai.configure(api_key=GOOGLE_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash-002')
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 try:
     creds_dict = json.loads(os.environ.get("GOOGLE_JSON_KEY"))
