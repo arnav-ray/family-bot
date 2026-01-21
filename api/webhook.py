@@ -697,7 +697,7 @@ def handle_expense_message(msg):
         try:
             chat_completion = client.chat.completions.create(
                 messages=messages,
-                model="llama-3.2-90b-vision-preview",  # Updated to actual Groq model
+                model="meta-llama/llama-4-scout-17b-16e-instruct",  # Updated to actual Groq model
                 temperature=0,
                 response_format={"type": "json_object"}
             )
