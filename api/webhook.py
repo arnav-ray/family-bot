@@ -13,7 +13,7 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 SHEET_ID = os.environ.get("GOOGLE_SHEET_ID")
 ALLOWED_USERS = json.loads(os.environ.get("ALLOWED_USERS", "[]"))
-BOT_USERNAME = "FamilyFinanceBot" # Optional: Replace with actual username
+BOT_USERNAME = "FamilyFinanceBot"
 
 # --- SETUP CLIENTS ---
 client = Groq(api_key=GROQ_API_KEY)
@@ -38,6 +38,11 @@ CRITICAL RULES:
 3. If no currency is specified, assume EUR.
 4. If category is ambiguous, use "Other".
 5. Output JSON only.
+
+MATH & CURRENCY FIXES:
+6. If the user types an integer like "655" for a grocery store (Lidl, Aldi, etc), assume it is cents and convert to 6.55.
+7. If the user types "6576" for groceries, assume 65.76 (or similar logical amount).
+8. Treat commas (,) as decimal points (.) for amounts.
 """
 
 # --- TEXT BLOCKS ---
@@ -97,11 +102,8 @@ class handler(BaseHTTPRequestHandler):
         user_id = msg.get('from', {}).get('id')
         
         # --- FIX: ROBUST USER NAME EXTRACTION ---
-        # 1. Try First Name
         first_name = msg.get('from', {}).get('first_name', '')
-        # 2. Try Username
         username = msg.get('from', {}).get('username', '')
-        # 3. Fallback logic
         user_name = first_name if first_name else (username if username else 'Unknown')
         
         # Security Check
@@ -123,7 +125,6 @@ class handler(BaseHTTPRequestHandler):
                     rows = sh.get_all_values()
                     if len(rows) > 1:
                         last_row = rows[-1]
-                        # Check ownership (Column F is index 5)
                         if len(last_row) > 5 and last_row[5] == user_name:
                             sh.delete_rows(len(rows))
                             send_telegram(chat_id, f"🗑️ *Deleted:* €{last_row[1]} ({last_row[3]})")
