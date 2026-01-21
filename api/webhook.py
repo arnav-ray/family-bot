@@ -1,3 +1,4 @@
+from http.server import BaseHTTPRequestHandler
 import json
 import os
 import requests
@@ -18,7 +19,6 @@ ALLOWED_USERS = json.loads(os.environ.get("ALLOWED_USERS", "[]"))
 genai.configure(api_key=GOOGLE_API_KEY)
 model = genai.GenerativeModel('gemini-1.5-flash')
 
-# Load Google Credentials
 try:
     creds_dict = json.loads(os.environ.get("GOOGLE_JSON_KEY"))
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
@@ -42,8 +42,8 @@ HELP_TEXT = f"""
 🤖 **Family Finance Bot Instructions**
 
 **1. Add an Expense**
-• `45 Rewe`
-• `12.50 Pizza`
+- `45 Rewe`
+- `12.50 Pizza`
 
 **2. Scan a Receipt** 📸
 Tap 📎 and send a photo.
@@ -73,124 +73,131 @@ def get_telegram_file(file_id):
     file_data = requests.get(download_url).content
     image = Image.open(BytesIO(file_data))
     
-    # Compress large images
     max_dim = 2048
     if image.width > max_dim or image.height > max_dim:
         image.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
         
     return image
 
-def handler(event, context):
-    # Health check endpoint
-    if event.get('httpMethod') == 'GET':
-        return {
-            'statusCode': 200,
-            'headers': {'Content-Type': 'text/plain'},
-            'body': 'Bot is Online 🟢'
-        }
+# VERCEL HANDLER CLASS - This is required!
+class handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b'Bot is Online \xf0\x9f\x9f\xa2')
+        return
     
-    if event.get('httpMethod') != 'POST':
-        return {'statusCode': 200, 'body': 'OK'}
-
-    try:
-        data = json.loads(event.get('body', '{}'))
-        if 'message' not in data:
-            return {'statusCode': 200, 'body': 'OK'}
-        
-        msg = data['message']
-        chat_id = msg['chat']['id']
-        user_id = msg.get('from', {}).get('id')
-        user_name = msg.get('from', {}).get('first_name', 'Unknown')
-        
-        # Security check
-        if user_id not in ALLOWED_USERS:
-            print(f"Blocked unauthorized user: {user_id}")
-            return {'statusCode': 200, 'body': 'OK'}
-
-        # Handle text commands
-        if 'text' in msg:
-            text_lower = msg['text'].strip().lower()
-            
-            # Help command
-            if text_lower in ['/start', '/help', 'help']:
-                send_telegram(chat_id, HELP_TEXT)
-                return {'statusCode': 200, 'body': 'OK'}
-            
-            # Undo command
-            if text_lower == '/undo':
-                try:
-                    sh = gc.open_by_key(SHEET_ID).sheet1
-                    rows = sh.get_all_values()
-                    
-                    if len(rows) <= 1:
-                        send_telegram(chat_id, "⚠️ Nothing to delete.")
-                        return {'statusCode': 200, 'body': 'OK'}
-                    
-                    last_row = rows[-1]
-                    # Check if user owns this entry (column 6 = index 5)
-                    if len(last_row) > 5 and last_row[5] == user_name:
-                        sh.delete_rows(len(rows))
-                        send_telegram(chat_id, f"🗑️ *Deleted:* €{last_row[1]} ({last_row[3]})")
-                    else:
-                        send_telegram(chat_id, "⚠️ Can't delete: The last entry was not made by you.")
-                except Exception as e:
-                    print(f"Undo error: {e}")
-                    send_telegram(chat_id, "⚠️ Error deleting entry.")
-                
-                return {'statusCode': 200, 'body': 'OK'}
-
-        # Process expense (text or photo)
-        input_content = []
-        input_content.append(SYSTEM_PROMPT.format(date=datetime.now().strftime("%Y-%m-%d")))
-        
-        if 'photo' in msg:
-            file_id = msg['photo'][-1]['file_id']
-            send_telegram(chat_id, "👀 Scanning receipt...")
-            image = get_telegram_file(file_id)
-            input_content.append(image)
-            input_content.append("Analyze this receipt image and extract the total amount, merchant name, and date.")
-        elif 'text' in msg:
-            input_content.append(f"User input: {msg['text']}")
-        else:
-            return {'statusCode': 200, 'body': 'OK'}
-
-        # Call Gemini AI
-        response = model.generate_content(input_content)
-        clean_json = response.text.replace("```json", "").replace("```", "").strip()
-        parsed = json.loads(clean_json)
-
-        # Validate amount
+    def do_POST(self):
         try:
-            amount = float(parsed.get('amount', 0))
-            if amount <= 0:
-                send_telegram(chat_id, "⚠️ Amount must be greater than 0. Try: '45 groceries'")
-                return {'statusCode': 200, 'body': 'OK'}
-        except (ValueError, TypeError):
-            send_telegram(chat_id, "⚠️ Couldn't understand the amount. Try: '45 groceries'")
-            return {'statusCode': 200, 'body': 'OK'}
+            content_length = int(self.headers['Content-Length'])
+            body = self.rfile.read(content_length).decode('utf-8')
+            data = json.loads(body)
+            
+            if 'message' not in data:
+                self.send_response(200)
+                self.end_headers()
+                return
+            
+            msg = data['message']
+            chat_id = msg['chat']['id']
+            user_id = msg.get('from', {}).get('id')
+            user_name = msg.get('from', {}).get('first_name', 'Unknown')
+            
+            if user_id not in ALLOWED_USERS:
+                print(f"Blocked unauthorized user: {user_id}")
+                self.send_response(200)
+                self.end_headers()
+                return
 
-        # Save to Google Sheets
-        sh = gc.open_by_key(SHEET_ID).sheet1
-        sh.append_row([
-            datetime.now().strftime("%Y-%m-%d %H:%M"),
-            amount,
-            parsed.get('category', 'Other'),
-            parsed.get('merchant', 'Unknown'),
-            parsed.get('note', ''),
-            user_name
-        ])
+            if 'text' in msg:
+                text_lower = msg['text'].strip().lower()
+                
+                if text_lower in ['/start', '/help', 'help']:
+                    send_telegram(chat_id, HELP_TEXT)
+                    self.send_response(200)
+                    self.end_headers()
+                    return
+                
+                if text_lower == '/undo':
+                    try:
+                        sh = gc.open_by_key(SHEET_ID).sheet1
+                        rows = sh.get_all_values()
+                        
+                        if len(rows) <= 1:
+                            send_telegram(chat_id, "⚠️ Nothing to delete.")
+                            self.send_response(200)
+                            self.end_headers()
+                            return
+                        
+                        last_row = rows[-1]
+                        if len(last_row) > 5 and last_row[5] == user_name:
+                            sh.delete_rows(len(rows))
+                            send_telegram(chat_id, f"🗑️ *Deleted:* €{last_row[1]} ({last_row[3]})")
+                        else:
+                            send_telegram(chat_id, "⚠️ Can't delete: The last entry was not made by you.")
+                    except Exception as e:
+                        print(f"Undo error: {e}")
+                        send_telegram(chat_id, "⚠️ Error deleting entry.")
+                    
+                    self.send_response(200)
+                    self.end_headers()
+                    return
 
-        # Send confirmation
-        reply = f"✅ Saved *€{amount}* to *{parsed.get('category', 'Other')}*"
-        if parsed.get('merchant'):
-            reply += f" ({parsed['merchant']})"
-        send_telegram(chat_id, reply)
+            input_content = []
+            input_content.append(SYSTEM_PROMPT.format(date=datetime.now().strftime("%Y-%m-%d")))
+            
+            if 'photo' in msg:
+                file_id = msg['photo'][-1]['file_id']
+                send_telegram(chat_id, "👀 Scanning receipt...")
+                image = get_telegram_file(file_id)
+                input_content.append(image)
+                input_content.append("Analyze this receipt image.")
+            elif 'text' in msg:
+                input_content.append(f"User input: {msg['text']}")
+            else:
+                self.send_response(200)
+                self.end_headers()
+                return
 
-    except json.JSONDecodeError as e:
-        print(f"JSON parsing error: {e}")
-        send_telegram(chat_id, "⚠️ Couldn't understand that. Try: '45 groceries'")
-    except Exception as e:
-        print(f"Unexpected error: {e}")
-        send_telegram(chat_id, "⚠️ Error processing request. Please try again.")
+            response = model.generate_content(input_content)
+            clean_json = response.text.replace("```json", "").replace("```", "").strip()
+            parsed = json.loads(clean_json)
 
-    return {'statusCode': 200, 'body': 'OK'}
+            try:
+                amount = float(parsed.get('amount', 0))
+                if amount <= 0:
+                    send_telegram(chat_id, "⚠️ Amount must be greater than 0. Try: '45 groceries'")
+                    self.send_response(200)
+                    self.end_headers()
+                    return
+            except (ValueError, TypeError):
+                send_telegram(chat_id, "⚠️ Couldn't understand the amount. Try: '45 groceries'")
+                self.send_response(200)
+                self.end_headers()
+                return
+
+            sh = gc.open_by_key(SHEET_ID).sheet1
+            sh.append_row([
+                datetime.now().strftime("%Y-%m-%d %H:%M"),
+                amount,
+                parsed.get('category', 'Other'),
+                parsed.get('merchant', 'Unknown'),
+                parsed.get('note', ''),
+                user_name
+            ])
+
+            reply = f"✅ Saved *€{amount}* to *{parsed.get('category', 'Other')}*"
+            if parsed.get('merchant'):
+                reply += f" ({parsed['merchant']})"
+            send_telegram(chat_id, reply)
+
+        except json.JSONDecodeError as e:
+            print(f"JSON parsing error: {e}")
+            send_telegram(chat_id, "⚠️ Couldn't understand that. Try: '45 groceries'")
+        except Exception as e:
+            print(f"Unexpected error: {e}")
+            send_telegram(chat_id, "⚠️ Error processing request. Please try again.")
+
+        self.send_response(200)
+        self.end_headers()
