@@ -1,80 +1,69 @@
-# 🤖 AI-Powered Family Finance Bot
+# 🤖 Family Finance Bot (AI-Powered)
 
-![Python](https://img.shields.io/badge/Python-3.9-blue?style=for-the-badge&logo=python&logoColor=white)
-![Netlify](https://img.shields.io/badge/Netlify-Serverless-00C7B7?style=for-the-badge&logo=netlify&logoColor=white)
-![Google Gemini](https://img.shields.io/badge/AI-Google%20Gemini%20Flash-8E75B2?style=for-the-badge)
-![Status](https://img.shields.io/badge/Status-Operational-success?style=for-the-badge)
+![Build Status](https://img.shields.io/badge/build-passing-brightgreen)
+![Platform](https://img.shields.io/badge/platform-Vercel-black)
+![AI Engine](https://img.shields.io/badge/AI-Groq%20LPU-orange)
+![Database](https://img.shields.io/badge/database-Google%20Sheets-green)
+![License](https://img.shields.io/badge/license-MIT-blue)
 
-A serverless Telegram bot that uses multimodal AI (Google Gemini) to parse natural language expenses and receipt photos, automatically logging them into a shared Google Sheet. Designed for zero-cost operation and maximum privacy.
+A serverless, event-driven Telegram bot that utilizes Large Language Models (LLMs) to automate personal finance tracking. It parses unstructured natural language and receipt images into structured data, syncing in real-time with Google Sheets.
+
+## 📋 Table of Contents
+- [Overview](#overview)
+- [Key Features](#key-features)
+- [Tech Stack](#tech-stack)
+- [Architecture](#architecture)
+- [Setup & Deployment](#setup--deployment)
+- [Configuration](#configuration)
+- [Troubleshooting](#troubleshooting)
+
+## 🧐 Overview
+The Family Finance Bot solves the friction of manual expense tracking. Instead of navigating complex UI/UX in finance apps, users simply text their expenses or send photos of receipts. The system uses Computer Vision and NLP to extract:
+- **Amount** (Currency normalized to EUR)
+- **Category** (Auto-classified)
+- **Merchant** (Entity extraction)
+- **User Identity** (Who spent the money)
 
 ## ✨ Key Features
+* ** multimodal Input:** Supports both text (`"15 Lunch"`) and images (OCR/Vision for receipts).
+* **Zero-Shot Classification:** AI intelligently categorizes expenses (e.g., "Netflix" → "Subscription") without training data.
+* **Identity Awareness:** Automatically tags the spender based on Telegram metadata.
+* **Smart Currency Logic:** Detects legacy currencies (e.g., "DM") or foreign currencies and normalizes them.
+* **CRUD Operations:** Includes an `/undo` command to safely revert the last transaction.
 
-* **🗣️ Natural Language Processing:** Type `45 Rewe groceries` and the AI extracts amount (€45), merchant (Rewe), and category (Groceries).
-* **📸 Receipt Scanning:** Snap a photo of a paper receipt. The bot reads the total and merchant using Google Gemini Vision.
-* **🧠 Intelligent Categorization:** Auto-categorizes merchants (e.g., "Aldi" → Groceries, "Shell" → Transport).
-* **⚡ Serverless Architecture:** Hosted on Netlify Functions (Free Tier) with no 24/7 server costs.
-* **🛡️ Secure & Private:** Strict user whitelisting and local environment variable management.
-* **🔙 Undo Function:** Mistake? Type `/undo` to delete the last entry.
-
-## 🛠️ Tech Stack
-
-* **Frontend:** Telegram Bot API (Webhooks)
-* **Backend:** Python 3.9 (Flask-style handler) via Netlify Functions
-* **AI Engine:** Google Gemini 1.5 Flash (via `google-generativeai`)
-* **Database:** Google Sheets (via `gspread`)
-* **Image Processing:** Pillow (PIL) for compression
-
-## 🚀 How It Works
-
-1.  **User** sends a message or photo to the Telegram Bot.
-2.  **Telegram** forwards the data to the Netlify Webhook URL.
-3.  **Netlify Function** wakes up, verifies the User ID against a whitelist.
-4.  **Google Gemini AI** analyzes the text/image and extracts a structured JSON object.
-5.  **Google Sheets API** appends the data to the secure spreadsheet.
-6.  **Bot** replies with a confirmation: "✅ Saved €45 to Groceries".
-
-## 📦 Setup & Deployment
-
-### Prerequisites
-* Telegram Bot Token (via @BotFather)
-* Google Cloud Service Account (`credentials.json`)
-* Google AI Studio API Key
-* Netlify Account
-
-### Installation
-1.  Clone the repository:
-    ```bash
-    git clone [https://github.com/yourusername/family-bot.git](https://github.com/yourusername/family-bot.git)
-    ```
-2.  Install dependencies locally for testing:
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-### Deployment (Netlify)
-1.  Import repository to Netlify.
-2.  Set the following Environment Variables:
-    * `TELEGRAM_TOKEN`
-    * `GOOGLE_API_KEY`
-    * `GOOGLE_SHEET_ID`
-    * `ALLOWED_USERS` (List of Telegram User IDs)
-    * `GOOGLE_JSON_KEY` (Content of service account JSON)
-3.  Deploy and set the Telegram Webhook URL.
-
-## 📸 Usage Examples
-
-| Action | Command / Input | Result |
+## 🛠 Tech Stack
+| Component | Technology | Rationale |
 | :--- | :--- | :--- |
-| **Log Expense** | `12.50 Pizza` | Logs €12.50 to "Food Takeout" |
-| **Log Transport** | `Uber 25` | Logs €25.00 to "Transport" |
-| **Scan Receipt** | *[Photo of Receipt]* | OCR extracts Total & Merchant |
-| **Delete Last** | `/undo` | Removes last row from Sheet |
-| **Help** | `/start` | Shows instructions |
+| **Runtime** | Python 3.9+ | Native support for AI libraries and robust HTTP handling. |
+| **Hosting** | Vercel Serverless | Event-driven architecture with zero idle costs. |
+| **AI Inference** | Groq Cloud API | Ultra-low latency LPU inference using **Llama 4 Vision**. |
+| **Database** | Google Sheets | Accessible UI for non-technical stakeholders; easy export/analysis. |
+| **Interface** | Telegram Bot API | High availability, mobile-first interface. |
 
-## 🔒 Security
-* **No Database:** Data lives only in your Google Sheet.
-* **Whitelist:** Unrecognized Telegram users are silently ignored.
-* **Secrets:** API keys are injected at runtime via Netlify Environment Variables.
+## 🏗 Architecture
+The system follows a **Serverless Webhook Pattern**:
+1.  **Event:** User sends message → Telegram API.
+2.  **Trigger:** Telegram pushes payload to Vercel Endpoint (`/api/webhook`).
+3.  **Auth:** Middleware validates `user_id` against the Allowlist.
+4.  **Processing:**
+    * *Text:* Passed to LLM with System Prompt.
+    * *Image:* Base64 encoded and passed to Vision Model.
+5.  **Persistence:** Structured JSON written to Google Sheets via `gspread`.
+6.  **Response:** Async callback sent to Telegram UI.
 
----
-*Built as a personal finance tool.*
+## 🚀 Setup & Deployment
+
+### 1. Prerequisites
+* **Telegram:** Create a bot via [@BotFather](https://t.me/botfather) and get the `TOKEN`.
+* **Groq:** Get an API Key from [Groq Console](https://console.groq.com).
+* **Google Cloud:** Create a Service Account, enable Sheets API, and download the JSON key.
+
+### 2. Environment Variables
+Configure the following in your Vercel Project Settings:
+
+```bash
+TELEGRAM_TOKEN=123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11
+GROQ_API_KEY=gsk_...
+GOOGLE_SHEET_ID=1A2B3C... (Found in URL of your Sheet)
+ALLOWED_USERS=[12345678, 87654321]
+GOOGLE_JSON_KEY={"type": "service_account", ...} # Full JSON content
