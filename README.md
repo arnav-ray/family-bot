@@ -1,9 +1,3 @@
-I apologize for that oversight! I have restored the full details regarding the **Expense Tracking** capabilities (Parsing, Receipt Scanning, Categories, and Dashboards) and integrated them alongside the new Goal features.
-
-Here is the complete, balanced **README.md** documentation.
-
----
-
 # 🤖 Family Finance Bot (AI-Powered) v2.0
 
 A serverless, event-driven Telegram bot that utilizes Large Language Models (LLMs) to automate personal finance tracking **and family goal setting**. It parses unstructured natural language and receipt images into structured data, syncing in real-time with Google Sheets.
@@ -176,5 +170,3 @@ share - Share bot with family
 |  | `/undogoal` | Delete *your* last goal |
 | **General** | `/share` | Get invite link for family |
 |  | `/start` | Open Main Menu |
-
----
