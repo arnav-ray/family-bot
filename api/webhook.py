@@ -1040,7 +1040,7 @@ def handle_add_goal(msg):
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": goal_input}
             ],
-            model="meta-llama/llama-4-scout-17b-16e-instruct"
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
             temperature=0,
             response_format={"type": "json_object"}
         )
