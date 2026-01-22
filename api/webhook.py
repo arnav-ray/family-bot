@@ -186,20 +186,33 @@ Output: {{"type": "Activity", "goal": "Get concert tickets", "target_amount": 80
 HELP_TEXT = """
 🤖 **Family Finance Bot**
 
-**Expense Tracking:**
-Just send an expense like "45 Rewe" or upload a receipt photo!
+**💰 Expense Tracking:**
+Just send: `45 Rewe` or upload a receipt photo
 
-**Commands:**
-`/start` - Show this help
-`/summary` - 📊 Expense Dashboard
-`/goals` - 🎯 View Family Goals
-`/goal [text]` - Add a new goal
-`/undo` - Delete your last expense
-`/share` - Share bot with family
+**🎯 Goal Tracking:**
+• `/goal` - Add a new goal
+• `/goals` - View all goals
+• Click ✅ to mark complete
+
+**📊 Dashboards:**
+• `/summary` - Expense analytics
+• `/goals` - Goal overview
+
+**Other Commands:**
+• `/undo` - Delete last expense
+• `/share` - Invite family members
 
 **Examples:**
-• Expense: "15 lunch"
-• Goal: "/goal Trip to Italy €2000 by June"
+📝 Expense: `15 lunch` or `12,50 pizza`
+🎯 Goals:
+  • `/goal Trip to Italy 2000 by June`
+  • `/goal Emergency fund 10000`
+  • `/goal Learn Spanish by summer`
+  • `/goal Renew passport next month`
+
+**Goal Format:**
+`/goal [description] [amount] [deadline]`
+Amount and deadline are optional!
 """
 
 SHARE_TEXT = f"""
@@ -870,6 +883,93 @@ def handle_callback_query(callback_query):
     message_id = callback_query['message']['message_id']
     data_val = callback_query['data']
     user_name = callback_query['from'].get('first_name', 'Unknown')
+    user_id = callback_query['from'].get('id')
+    
+    # Handle main menu callbacks
+    if data_val.startswith('menu:'):
+        menu_action = data_val[5:]
+        
+        if menu_action == 'summary':
+            # Show expense dashboard
+            report, _ = dashboard.generate_summary("overview")
+            keyboard = build_dashboard_keyboard("overview")
+            edit_telegram_message(chat_id, message_id, report, keyboard)
+            answer_callback(callback_id, "Loading expenses...")
+            
+        elif menu_action == 'goals':
+            # Show goals
+            handle_view_goals_internal(chat_id, message_id)
+            answer_callback(callback_id, "Loading goals...")
+            
+        elif menu_action == 'goal_help':
+            # Show goal creation help
+            goal_help_text = """
+**🎯 How to Add Goals**
+
+**Format:**
+`/goal [description] [amount] [deadline]`
+
+**Examples:**
+
+💰 **With Money & Date:**
+`/goal Trip to Italy 2000 by June`
+`/goal Buy car €15000 by December 2026`
+
+💰 **Money Only:**
+`/goal Emergency fund 10000`
+`/goal Save for wedding 5000`
+
+📅 **Task with Deadline:**
+`/goal Renew passport next month`
+`/goal File taxes by April`
+
+📝 **Simple Task:**
+`/goal Learn Spanish`
+`/goal Call insurance company`
+
+**Tips:**
+• Amount can be with or without € symbol
+• Dates like "June", "summer", "next month" work!
+• Just describe what you want - AI figures it out
+
+**Ready?** Type `/goal` followed by your goal!
+"""
+            back_keyboard = {
+                "inline_keyboard": [[
+                    {"text": "⬅️ Back to Menu", "callback_data": "menu:main"}
+                ]]
+            }
+            edit_telegram_message(chat_id, message_id, goal_help_text, back_keyboard)
+            answer_callback(callback_id)
+            
+        elif menu_action == 'share':
+            # Show share info
+            back_keyboard = {
+                "inline_keyboard": [[
+                    {"text": "⬅️ Back to Menu", "callback_data": "menu:main"}
+                ]]
+            }
+            edit_telegram_message(chat_id, message_id, SHARE_TEXT, back_keyboard)
+            answer_callback(callback_id)
+            
+        elif menu_action == 'main':
+            # Back to main menu
+            main_menu_keyboard = {
+                "inline_keyboard": [
+                    [
+                        {"text": "💰 Expense Dashboard", "callback_data": "menu:summary"},
+                        {"text": "🎯 View Goals", "callback_data": "menu:goals"}
+                    ],
+                    [
+                        {"text": "📖 How to Add Goal", "callback_data": "menu:goal_help"},
+                        {"text": "📤 Share Bot", "callback_data": "menu:share"}
+                    ]
+                ]
+            }
+            edit_telegram_message(chat_id, message_id, HELP_TEXT, main_menu_keyboard)
+            answer_callback(callback_id)
+        
+        return
     
     # Handle goal completion
     if data_val.startswith('d:'):
@@ -954,7 +1054,20 @@ def handle_command(msg):
     text = msg['text'].lower()
     
     if text == '/start' or text == '/help':
-        send_telegram(chat_id, HELP_TEXT)
+        # Build main menu keyboard
+        main_menu_keyboard = {
+            "inline_keyboard": [
+                [
+                    {"text": "💰 Expense Dashboard", "callback_data": "menu:summary"},
+                    {"text": "🎯 View Goals", "callback_data": "menu:goals"}
+                ],
+                [
+                    {"text": "📖 How to Add Goal", "callback_data": "menu:goal_help"},
+                    {"text": "📤 Share Bot", "callback_data": "menu:share"}
+                ]
+            ]
+        }
+        send_telegram(chat_id, HELP_TEXT, main_menu_keyboard)
         
     elif text == '/share':
         send_telegram(chat_id, SHARE_TEXT)
@@ -1021,14 +1134,20 @@ def handle_add_goal(msg):
     if not goal_input:
         send_telegram(
             chat_id,
-            "**Usage:** `/goal [description] [amount] [deadline]`\n\n"
+            "**🎯 How to Add a Goal**\n\n"
+            "**Format:**\n"
+            "`/goal [description] [amount] [deadline]`\n\n"
             "**Examples:**\n"
-            "• `/goal Trip to Italy €2000 by June`\n"
+            "• `/goal Trip to Italy 2000 by June`\n"
             "• `/goal Emergency fund 10000`\n"
             "• `/goal Learn Spanish by summer`\n"
-            "• `/goal Renew insurance next month`"
+            "• `/goal Renew insurance next month`\n\n"
+            "💡 **Tip:** Amount and deadline are optional!"
         )
         return
+    
+    # Send "processing" message
+    send_telegram(chat_id, "⏳ Processing your goal...")
     
     # Call AI to parse goal
     try:
@@ -1045,22 +1164,39 @@ def handle_add_goal(msg):
             response_format={"type": "json_object"}
         )
         
-        parsed = json.loads(response.choices[0].message.content)
+        response_content = response.choices[0].message.content
+        logger.info(f"AI raw response: {response_content}")
+        
+        parsed = json.loads(response_content)
         logger.info(f"Goal parsed: {parsed}")
         
-    except Exception as e:
-        logger.error(f"AI parsing failed for goal: {e}", exc_info=True)
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON parsing failed: {e}. Raw response: {response_content if 'response_content' in locals() else 'N/A'}")
         send_telegram(
             chat_id,
-            "⚠️ Could not parse goal. Please try:\n"
-            "`/goal Trip to Italy €2000 by June`"
+            "⚠️ Could not parse goal (invalid AI response).\n\n"
+            "Please try again with a clearer format:\n"
+            "`/goal Trip to Italy 2000 by June`"
+        )
+        return
+    except Exception as e:
+        logger.error(f"AI request failed: {e}", exc_info=True)
+        send_telegram(
+            chat_id,
+            "⚠️ AI service error. Please try again.\n\n"
+            "If this persists, try a simpler format:\n"
+            "`/goal Save money 5000`"
         )
         return
     
     # Validate parsed data
     is_valid, errors = validate_goal_data(parsed)
     if not is_valid:
-        error_msg = "⚠️ Invalid goal:\n• " + "\n• ".join(errors)
+        error_msg = "⚠️ **Invalid goal:**\n\n"
+        for error in errors:
+            error_msg += f"• {error}\n"
+        error_msg += "\n**Try again with correct format:**\n"
+        error_msg += "`/goal [description] [amount] [deadline]`"
         send_telegram(chat_id, error_msg)
         return
     
@@ -1070,24 +1206,29 @@ def handle_add_goal(msg):
     if success:
         # Build confirmation message
         goal_name = parsed.get('goal', 'Unknown')
+        goal_type = parsed.get('type', 'Other')
         amount = float(parsed.get('target_amount', 0))
         target_date = parsed.get('target_date')
         
-        confirm_msg = f"🎯 **Goal Set:** {goal_name}"
+        confirm_msg = f"🎉 **Goal Created!**\n\n"
+        confirm_msg += f"📝 **Name:** {goal_name}\n"
+        confirm_msg += f"🏷️ **Type:** {goal_type}\n"
         
         if amount > 0:
-            confirm_msg += f"\n💰 **Target:** €{amount:,.2f}"
+            confirm_msg += f"💰 **Target:** €{amount:,.2f}\n"
         
         if target_date and target_date != 'null':
             try:
                 date_obj = datetime.strptime(target_date, "%Y-%m-%d")
-                confirm_msg += f"\n📅 **Due:** {date_obj.strftime('%b %d, %Y')}"
+                confirm_msg += f"📅 **Due:** {date_obj.strftime('%b %d, %Y')}\n"
             except:
                 pass
         
+        confirm_msg += f"\n✅ View all goals: `/goals`"
+        
         send_telegram(chat_id, confirm_msg)
     else:
-        send_telegram(chat_id, "⚠️ Failed to save goal. Please try again.")
+        send_telegram(chat_id, "⚠️ Failed to save goal. Please try again or contact support.")
 
 def handle_view_goals(msg):
     """Handle /goals command to view all goals"""
@@ -1193,7 +1334,7 @@ def handle_expense_message(msg):
         try:
             chat_completion = client.chat.completions.create(
                 messages=messages,
-                model="llama-3.2-90b-vision-preview",
+                model="meta-llama/llama-4-scout-17b-16e-instruct",
                 temperature=0,
                 response_format={"type": "json_object"}
             )
